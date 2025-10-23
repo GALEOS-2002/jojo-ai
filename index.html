@@ -1,57 +1,5 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ジョジョ風AIと会話（無料・Web公開）</title>
-  <style>
-    :root{--bd:#e5e7eb;--bg:#fafafa}
-    body{font-family:system-ui,-apple-system,'Hiragino Sans',Meiryo,sans-serif;max-width:760px;margin:24px auto;padding:0 12px;line-height:1.6}
-    h1{font-size:1.3rem;margin:0 0 8px}
-    .row{display:flex;gap:8px;margin:10px 0;align-items:center}
-    select,textarea,button,input{font-size:1rem}
-    textarea{width:100%;padding:10px}
-    button{padding:10px 14px;cursor:pointer}
-    #chat{border:1px solid var(--bd);border-radius:12px;padding:12px;min-height:220px;background:var(--bg);overflow:auto}
-    .msg{white-space:pre-wrap;padding:10px 14px;border-radius:12px;margin:8px 0;max-width:86%}
-    .me{background:#e8f0fe;margin-left:auto}
-    .bot{background:#f1f5f9}
-    small{color:#6b7280}
-    .footer{margin-top:10px}
-    .note{background:#fff8e1;border:1px solid #facc15;border-radius:8px;padding:8px 10px;margin:8px 0}
-  </style>
-</head>
-<body>
-  <h1>ジョジョ風AIと会話（無料・Web公開）</h1>
-  <p class="note"><strong>⚠ 注意：</strong> このページ内の <code>WORKER_URL</code> を後であなたの Cloudflare Workers のURLに変更するとAIが本当に返事します。今はデモ返信モードです。</p>
-
-  <div class="row">
-    <label for="persona"><small>キャラ風</small></label>
-    <select id="persona">
-      <option value="jotaro">空条承太郎 風</option>
-      <option value="dio">DIO 風</option>
-      <option value="joseph">ジョセフ 風</option>
-      <option value="rohan">岸辺露伴 風</option>
-    </select>
-    <span style="margin-left:auto"><small id="status">準備OK</small></span>
-  </div>
-
-  <div id="chat" aria-live="polite" aria-label="チャット履歴"></div>
-
-  <div class="row">
-    <textarea id="input" rows="3" placeholder="質問を書いて Ctrl/⌘+Enter で送信（例：明日の面接が不安）"></textarea>
-  </div>
-  <div class="row">
-    <button id="send">送信</button>
-    <label class="footer"><input type="checkbox" id="persist" checked> 履歴をこの端末に保存</label>
-  </div>
-
-  <p class="footer"><small>※このAIは「ジョジョ風」の二次創作表現です。原作の台詞の長文引用や暴力・差別表現は行いません。</small></p>
-
 <script>
-  // ======= 後でここをあなたの Workers のURLに書き換え =======
-const WORKER_URL = "https://galeos-2002.github.io/jojo-ai/";
-// ===========================================================
+const WORKER_URL = "https://jojo-ai-worker.cfrvwj2pyg.workers.dev";
 
 const chat = document.getElementById('chat');
 const input = document.getElementById('input');
@@ -61,7 +9,7 @@ const statusEl = document.getElementById('status');
 const persist = document.getElementById('persist');
 const KEY = "jojo_ai_chat_history_v1";
 
-function bubble(text, me=false){
+function bubble(text, me=false) {
   const div = document.createElement('div');
   div.className = 'msg ' + (me ? 'me' : 'bot');
   div.textContent = text;
@@ -69,68 +17,64 @@ function bubble(text, me=false){
   chat.scrollTop = chat.scrollHeight;
 }
 
-function loadHistory(){
-  try{
+function loadHistory() {
+  try {
     const saved = localStorage.getItem(KEY);
-    if(!saved) return;
+    if (!saved) return;
     const arr = JSON.parse(saved);
     arr.forEach(m => bubble(m.text, m.me));
-  }catch{}
+  } catch {}
 }
-function saveHistory(){
-  if(!persist.checked) return;
-  try{
+
+function saveHistory() {
+  if (!persist.checked) return;
+  try {
     const nodes = Array.from(document.querySelectorAll('.msg')).map(n => ({
-      text: n.textContent, me: n.classList.contains('me')
+      text: n.textContent,
+      me: n.classList.contains('me')
     }));
     localStorage.setItem(KEY, JSON.stringify(nodes.slice(-40)));
-  }catch{}
-}
-function clearHistory(){
-  try{ localStorage.removeItem(KEY); }catch{}
+  } catch {}
 }
 
-async function ask(){
-  const message = input.value.trim();
-  if(!message) return;
-  bubble(message, true);
-  input.value = '';
-  send.disabled = true; send.textContent = '考え中…'; statusEl.textContent = '送信中';
+function clearHistory() {
+  localStorage.removeItem(KEY);
+  chat.innerHTML = "";
+}
 
-  try{
-    if (!WORKER_URL.includes('.workers.dev')) {
-      await new Promise(r=>setTimeout(r, 500));
-      bubble('（デモ返信）WORKER_URLをセットするとAIが本当に返事します。', false);
-      return;
-    }
-    const r = await fetch(WORKER_URL, {
+async function ask() {
+  const text = input.value.trim();
+  if (!text) return;
+  bubble(text, true);
+  input.value = "";
+  saveHistory();
+
+  statusEl.textContent = "送信中…";
+  try {
+    const res = await fetch(WORKER_URL, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message, persona: personaSel.value })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        persona: personaSel.value
+      })
     });
-    const data = await r.json();
-    if (!r.ok || data.error){
-      throw new Error(data.error || 'エラー');
-    }
-    bubble(data.reply || '…', false);
-  }catch(e){
-    bubble('エラー: ' + e.message, false);
-  }finally{
+    const data = await res.json();
+    const reply = data.reply || data.error || "（エラー）";
+    bubble(reply, false);
+  } catch (e) {
+    bubble("エラー: " + e.message, false);
+  } finally {
+    statusEl.textContent = "準備OK";
     saveHistory();
-    send.disabled = false; send.textContent = '送信'; statusEl.textContent = '準備OK';
   }
 }
 
-send.onclick = ask;
+send.addEventListener('click', ask);
 input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ask();
-});
-
-persist.addEventListener('change', () => {
-  if(!persist.checked) clearHistory();
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') ask();
 });
 
 loadHistory();
+statusEl.textContent = "準備OK";
 </script>
-</body>
-</html>
