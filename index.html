@@ -1,82 +1,189 @@
-<script>
-// 置き換え先（行コメントの下）
-const WORKER_URL = "https://jojo-ai-worker.cfrvwj2pyg.workers.dev/chat";
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ジョジョ風AIと会話（無料・Web公開）</title>
+  <style>
+    :root { --bd:#e5e7eb; --bg:#fafafa; --ink:#111827; --sub:#6b7280; --acc:#2563eb; }
+    html,body{height:100%}
+    body{
+      margin:0; padding:16px; color:var(--ink); background:var(--bg);
+      font-family:system-ui,-apple-system,"Hiragino Sans","Segoe UI",Meiryo,sans-serif;
+      line-height:1.55;
+    }
+    h1{ font-size:1.35rem; margin:0 0 8px }
+    .note{ background:#fff8e1; border:1px solid #facc15; border-radius:8px; padding:10px 12px; margin:10px 0 }
+    .row{ display:flex; gap:8px; align-items:center; margin:10px 0 }
+    select,textarea,input,button{ font-size:1rem }
+    textarea{ width:100%; padding:10px; border:1px solid var(--bd); border-radius:8px; background:white }
+    button{ padding:10px 14px; border-radius:8px; border:1px solid var(--bd); background:white; cursor:pointer }
+    button.primary{ background:var(--acc); color:white; border-color:var(--acc) }
+    #chat{ border:1px solid var(--bd); border-radius:10px; background:white; padding:10px; height:42vh; overflow:auto }
+    .msg{ white-space:pre-wrap; padding:10px 12px; border-radius:12px; margin:6px 0; max-width:88% }
+    .me { background:#e0ecff; margin-left:auto }
+    .bot{ background:#f1f5f9 }
+    .small{ color:var(--sub); font-size:0.9rem }
+    .footer{ display:flex; align-items:center; gap:8px; margin-top:8px }
+    .status{ margin-left:auto; font-size:0.9rem; color:var(--sub) }
+    .badge{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--bd); background:white; font-size:0.85rem }
+    a{ color:var(--acc) }
+  </style>
+</head>
+<body>
+  <h1>ジョジョ風AIと会話（無料・Web公開）</h1>
 
+  <div id="warn" class="note" hidden>
+    ⚠ <b>このページはまだ「あなたの Workers のURL」を認識していません。</b>
+    次のどちらかで設定してください。<br>
+    ① URLの末尾に <code>?w=あなたのWorkersのURL</code> を付けて開く<br>
+    ② このリポジトリに <code>worker.txt</code> を置き、1行だけURLを書く（例：<code>https://xxx.workers.dev/chat</code>）<br>
+    設定が見つかり次第、自動で本物のAIに接続します。
+  </div>
 
-const chat = document.getElementById('chat');
-const input = document.getElementById('input');
-const send = document.getElementById('send');
-const personaSel = document.getElementById('persona');
-const statusEl = document.getElementById('status');
-const persist = document.getElementById('persist');
-const KEY = "jojo_ai_chat_history_v1";
+  <div class="row">
+    <label class="small">キャラ風：</label>
+    <select id="persona">
+      <option value="jotaro">空条承太郎 風</option>
+      <option value="dio">DIO 風</option>
+      <option value="joseph">ジョセフ 風</option>
+      <option value="rohan">岸辺露伴 風</option>
+    </select>
 
-function bubble(text, me=false) {
-  const div = document.createElement('div');
-  div.className = 'msg ' + (me ? 'me' : 'bot');
-  div.textContent = text;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
+    <span id="status" class="status badge">準備中…</span>
+  </div>
 
-function loadHistory() {
-  try {
-    const saved = localStorage.getItem(KEY);
-    if (!saved) return;
-    const arr = JSON.parse(saved);
-    arr.forEach(m => bubble(m.text, m.me));
-  } catch {}
-}
+  <div id="chat" aria-live="polite" aria-label="チャット履歴"></div>
 
-function saveHistory() {
-  if (!persist.checked) return;
-  try {
-    const nodes = Array.from(document.querySelectorAll('.msg')).map(n => ({
-      text: n.textContent,
-      me: n.classList.contains('me')
-    }));
-    localStorage.setItem(KEY, JSON.stringify(nodes.slice(-40)));
-  } catch {}
-}
+  <div class="row">
+    <textarea id="input" rows="3" placeholder="質問を書いて Ctrl/⌘+Enter でも送信"></textarea>
+  </div>
+  <div class="footer">
+    <button id="send" class="primary">送信</button>
+    <label class="small"><input type="checkbox" id="persist" checked> 履歴をこの端末に保存</label>
+    <button id="clear">履歴クリア</button>
+  </div>
 
-function clearHistory() {
-  localStorage.removeItem(KEY);
-  chat.innerHTML = "";
-}
+  <p class="small">
+    ※ このAIは『ジョジョ』風の二次創作表現です。原作の長文引用や暴力・差別表現は行いません。
+  </p>
 
-async function ask() {
-  const text = input.value.trim();
-  if (!text) return;
-  bubble(text, true);
-  input.value = "";
-  saveHistory();
+  <script>
+    // ===== 1) Worker URL 自動解決：?w=... → worker.txt → 既定値 の順で採用 =====
+    const DEFAULT_WORKER = "https://jojo-ai-worker.cfrvwj2pyg.workers.dev/chat"; // 好きに変更可
+    const qs = new URLSearchParams(location.search);
+    let WORKER_URL = (qs.get("w") || "").trim();
 
-  statusEl.textContent = "送信中…";
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: text,
-        persona: personaSel.value
-      })
+    function normalizeEndpoint(u){
+      if(!u) return "";
+      u = u.trim();
+      // 末尾に /chat が無ければ自動付与（Workersのルートに直接生やしていない人向け）
+      if (u.endsWith("/chat")) return u;
+      if (u.endsWith("/")) return u + "chat";
+      // workers.dev など末尾にパス無しなら /chat を足す
+      try { const t = new URL(u); if (t.pathname === "/" || !t.pathname) return u + "/chat"; }
+      catch(e){ /* クエリからの不完全URLはそのまま */ }
+      return u;
+    }
+
+    async function resolveWorkerURL(){
+      if (WORKER_URL) return normalizeEndpoint(WORKER_URL);
+      try {
+        const r = await fetch("worker.txt", {cache:"no-store"});
+        if (r.ok) {
+          const t = (await r.text()).trim();
+          if (t) return normalizeEndpoint(t);
+        }
+      } catch(e){}
+      return normalizeEndpoint(DEFAULT_WORKER);
+    }
+
+    // ===== 2) UI 参照 =====
+    const chat     = document.getElementById('chat');
+    const input    = document.getElementById('input');
+    const sendBtn  = document.getElementById('send');
+    const clearBtn = document.getElementById('clear');
+    const personaSel = document.getElementById('persona');
+    const statusEl = document.getElementById('status');
+    const persist  = document.getElementById('persist');
+    const KEY = "jojo_ai_chat_history_v1";
+
+    function bubble(text, me=false){
+      const div = document.createElement('div');
+      div.className = 'msg ' + (me ? 'me' : 'bot');
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function loadHistory(){
+      try{
+        const saved = localStorage.getItem(KEY);
+        if(!saved) return;
+        JSON.parse(saved).forEach(m => bubble(m.text, m.me));
+      }catch(e){}
+    }
+    function saveHistory(){
+      if(!persist.checked) return;
+      try{
+        const nodes = Array.from(chat.querySelectorAll('.msg')).map(n => ({
+          text: n.textContent, me: n.classList.contains('me')
+        }));
+        localStorage.setItem(KEY, JSON.stringify(nodes.slice(-80)));
+      }catch(e){}
+    }
+    clearBtn.onclick = () => { chat.textContent = ""; localStorage.removeItem(KEY); input.focus(); };
+
+    async function send(){
+      const text = input.value.trim();
+      if(!text) return;
+      const persona = personaSel.value;
+
+      bubble(text, true);
+      input.value = ""; input.focus();
+      saveHistory();
+
+      try{
+        status('送信中…');
+        const res = await fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          mode: "cors",
+          body: JSON.stringify({ message: text, persona })
+        });
+        if(!res.ok){
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const reply = data.reply || data.message || JSON.stringify(data);
+        bubble(reply, false);
+        saveHistory();
+        status('OK');
+      }catch(err){
+        bubble(`エラー: ${err.message}`, false);
+        status('エラー');
+      }
+    }
+
+    function status(t){ statusEl.textContent = t; }
+
+    // ショートカット送信
+    input.addEventListener('keydown', (e)=>{
+      if((e.ctrlKey || e.metaKey) && e.key === 'Enter') send();
     });
-    const data = await res.json();
-    const reply = data.reply || data.error || "（エラー）";
-    bubble(reply, false);
-  } catch (e) {
-    bubble("エラー: " + e.message, false);
-  } finally {
-    statusEl.textContent = "準備OK";
-    saveHistory();
-  }
-}
+    sendBtn.onclick = send;
 
-send.addEventListener('click', ask);
-input.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') ask();
-});
-
-loadHistory();
-statusEl.textContent = "準備OK";
-</script>
+    // ===== 3) 初期化 =====
+    (async function init(){
+      loadHistory();
+      WORKER_URL = await resolveWorkerURL();
+      const hasQuery = !!qs.get("w");
+      const usedDefault = (WORKER_URL === normalizeEndpoint(DEFAULT_WORKER)) && !hasQuery;
+      document.getElementById('warn').hidden = !usedDefault;
+      status(usedDefault ? 'デモURL（変更推奨）' : '準備OK');
+      // 使うURLをコンソールにも表示（デバッグ用）
+      console.log("WORKER_URL =", WORKER_URL);
+    })();
+  </script>
+</body>
+</html>
